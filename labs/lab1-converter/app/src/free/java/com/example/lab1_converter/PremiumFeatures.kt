@@ -13,10 +13,10 @@ fun PremiumFeatures(
         copyToButton: @Composable () -> Unit
     ) -> Unit
 ) {
-    // For the free version, we just call the content with empty composables
+    // Передаем пустые функции без имен
     content(
-        swapButton = { /* Empty */ },
-        copyFromButton = { /* Empty */ },
-        copyToButton = { /* Empty */ }
+        { /* Empty swapButton */ },
+        { /* Empty copyFromButton */ },
+        { /* Empty copyToButton */ }
     )
 }
