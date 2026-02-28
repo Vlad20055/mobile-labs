@@ -23,6 +23,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -32,20 +34,35 @@ import androidx.compose.ui.unit.dp
 import com.example.lab1_converter.ui.theme.Lab1converterTheme
 
 sealed class ConversionUnit(val name: String, val category: String, val toBase: (Double) -> Double, val fromBase: (Double) -> Double) {
-    object Meters : ConversionUnit("Meters", "Distance", { it }, { it })
-    object Kilometers : ConversionUnit("Kilometers", "Distance", { it * 1000 }, { it / 1000 })
-    object Miles : ConversionUnit("Miles", "Distance", { it * 1609.34 }, { it / 1609.34 })
+    // Расстояние (базовая ед. - метр)
+    object Centimeters : ConversionUnit("см", "Расстояние", { it / 100.0 }, { it * 100.0 })
+    object Meters : ConversionUnit("м", "Расстояние", { it }, { it })
+    object Kilometers : ConversionUnit("км", "Расстояние", { it * 1000.0 }, { it / 1000.0 })
+    object Miles : ConversionUnit("мл", "Расстояние", { it * 1609.34 }, { it / 1609.34 })
 
-    object Grams : ConversionUnit("Grams", "Weight", { it }, { it })
-    object Kilograms : ConversionUnit("Kilograms", "Weight", { it * 1000 }, { it / 1000 })
-    object Pounds : ConversionUnit("Pounds", "Weight", { it * 453.592 }, { it / 453.592 })
+    // Масса (базовая ед. - килограмм)
+    object Grams : ConversionUnit("г", "Масса", { it / 1000.0 }, { it * 1000.0 })
+    object Kilograms : ConversionUnit("кг", "Масса", { it }, { it })
+    object Centners : ConversionUnit("ц", "Масса", { it * 100.0 }, { it / 100.0 })
+    object Tonnes : ConversionUnit("т", "Масса", { it * 1000.0 }, { it / 1000.0 })
 
-    object USD : ConversionUnit("USD", "Currency", { it }, { it })
-    object EUR : ConversionUnit("EUR", "Currency", { it * 1.1 }, { it / 1.1 }) // Dummy rate
-    object RUB : ConversionUnit("RUB", "Currency", { it * 0.011 }, { it / 0.011 }) // Dummy rate
+    // Время (базовая ед. - минута)
+    object Seconds : ConversionUnit("с", "Время", { it / 60.0 }, { it * 60.0 })
+    object Minutes : ConversionUnit("мин", "Время", { it }, { it }) // ИСПРАВЛЕНО: "м" -> "мин"
+    object Hours : ConversionUnit("ч", "Время", { it * 60.0 }, { it / 60.0 })
 }
 
-val allUnits = listOf(ConversionUnit.Meters, ConversionUnit.Kilometers, ConversionUnit.Miles, ConversionUnit.Grams, ConversionUnit.Kilograms, ConversionUnit.Pounds, ConversionUnit.USD, ConversionUnit.EUR, ConversionUnit.RUB)
+val allUnits = listOf(
+    ConversionUnit.Centimeters, ConversionUnit.Meters, ConversionUnit.Kilometers, ConversionUnit.Miles,
+    ConversionUnit.Grams, ConversionUnit.Kilograms, ConversionUnit.Centners, ConversionUnit.Tonnes,
+    ConversionUnit.Seconds, ConversionUnit.Minutes, ConversionUnit.Hours
+)
+
+// "Сохранитель" для ConversionUnit, чтобы rememberSaveable знал, как с ним работать
+val unitSaver = Saver<ConversionUnit, String>(
+    save = { it.name },
+    restore = { name -> allUnits.first { it.name == name } }
+)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -70,19 +87,24 @@ fun MainApp() {
 
 @Composable
 fun ConverterApp() {
-    var fromValue by remember { mutableStateOf("") }
-    var toValue by remember { mutableStateOf("") }
-    var fromUnit by remember { mutableStateOf<ConversionUnit>(ConversionUnit.Meters) }
-    var toUnit by remember { mutableStateOf<ConversionUnit>(ConversionUnit.Kilometers) }
+    // remember заменен на rememberSaveable
+    var fromValue by rememberSaveable { mutableStateOf("") }
+    var toValue by remember { mutableStateOf("") } // Это значение вычисляется, его сохранять не нужно
+    var fromUnit by rememberSaveable(stateSaver = unitSaver) { mutableStateOf<ConversionUnit>(ConversionUnit.Meters) }
+    var toUnit by rememberSaveable(stateSaver = unitSaver) { mutableStateOf<ConversionUnit>(ConversionUnit.Kilometers) }
 
     LaunchedEffect(fromValue, fromUnit, toUnit) {
+        if (fromValue.isBlank()) {
+            toValue = ""
+            return@LaunchedEffect
+        }
         val from = fromValue.toDoubleOrNull()
         if (from != null) {
-            toValue = convert(from, fromUnit, toUnit).toString()
+            toValue = "%.4f".format(convert(from, fromUnit, toUnit))
         }
     }
 
-    val onSwap = { 
+    val onSwap = {
         val tempUnit = fromUnit
         fromUnit = toUnit
         toUnit = tempUnit
@@ -94,16 +116,16 @@ fun ConverterApp() {
 
     val configuration = LocalConfiguration.current
     if (configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) {
-        Row(modifier = Modifier.fillMaxSize()) {
+        Row(modifier = Modifier.fillMaxSize().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             DataFragment(modifier = Modifier.weight(1f), fromValue = fromValue, toValue = toValue, fromUnit = fromUnit, toUnit = toUnit, onFromUnitChange = { fromUnit = it }, onToUnitChange = { toUnit = it }, onSwap = onSwap)
             KeyboardFragment(modifier = Modifier.weight(1f)) { key ->
                     fromValue = updateFromValue(fromValue, key)
             }
         }
     } else {
-        Column(modifier = Modifier.fillMaxSize()) {
-            DataFragment(modifier = Modifier.weight(1f), fromValue = fromValue, toValue = toValue, fromUnit = fromUnit, toUnit = toUnit, onFromUnitChange = { fromUnit = it }, onToUnitChange = { toUnit = it }, onSwap = onSwap)
-            KeyboardFragment(modifier = Modifier.weight(1f)) { key ->
+        Column(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            DataFragment(modifier = Modifier.weight(2.5f), fromValue = fromValue, toValue = toValue, fromUnit = fromUnit, toUnit = toUnit, onFromUnitChange = { fromUnit = it }, onToUnitChange = { toUnit = it }, onSwap = onSwap)
+            KeyboardFragment(modifier = Modifier.weight(5f)) { key ->
                 fromValue = updateFromValue(fromValue, key)
             }
         }
@@ -111,6 +133,7 @@ fun ConverterApp() {
 }
 
 fun updateFromValue(currentValue: String, key: String): String {
+    val maxLength = 10
     return when (key) {
         "C" -> {
             if (currentValue.isNotEmpty()) {
@@ -120,88 +143,110 @@ fun updateFromValue(currentValue: String, key: String): String {
             }
         }
         "." -> {
-            if (!currentValue.contains(".")) {
+            if (!currentValue.contains(".") && currentValue.length < maxLength) {
                 currentValue + key
             } else {
                 currentValue
             }
         }
-        else -> currentValue + key
+        else -> {
+            if (currentValue.length < maxLength) {
+                currentValue + key
+            } else {
+                currentValue
+            }
+        }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DataFragment(modifier: Modifier = Modifier, fromValue: String, toValue: String, fromUnit: ConversionUnit, toUnit: ConversionUnit, onFromUnitChange: (ConversionUnit) -> Unit, onToUnitChange: (ConversionUnit) -> Unit, onSwap: () -> Unit) {
+fun DataFragment(
+    modifier: Modifier = Modifier, 
+    fromValue: String, 
+    toValue: String, 
+    fromUnit: ConversionUnit, 
+    toUnit: ConversionUnit, 
+    onFromUnitChange: (ConversionUnit) -> Unit, 
+    onToUnitChange: (ConversionUnit) -> Unit, 
+    onSwap: () -> Unit
+) {
     var expandedFrom by remember { mutableStateOf(false) }
     var expandedTo by remember { mutableStateOf(false) }
     val toUnits = allUnits.filter { it.category == fromUnit.category }
 
-    Column(modifier = modifier.padding(16.dp), verticalArrangement = Arrangement.SpaceEvenly) {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(
-                value = fromValue,
-                onValueChange = { },
-                readOnly = true,
-                label = { Text("From") }
-            )
-
-            ExposedDropdownMenuBox(expanded = expandedFrom, onExpandedChange = { expandedFrom = !expandedFrom }) {
+    PremiumFeatures(fromValue = fromValue, toValue = toValue, onSwap = onSwap) { swapButton, copyFromButton, copyToButton ->
+        Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
-                    value = fromUnit.name,
-                    onValueChange = {},
+                    value = fromValue,
+                    onValueChange = { },
                     readOnly = true,
-                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedFrom) },
-                    modifier = Modifier.menuAnchor()
+                    label = { Text("From") },
+                    modifier = Modifier.weight(3f)
                 )
-                ExposedDropdownMenu(expanded = expandedFrom, onDismissRequest = { expandedFrom = false }) {
-                    allUnits.forEach {
-                        DropdownMenuItem(text = { Text(it.name) }, onClick = { 
-                            onFromUnitChange(it)
-                            if (it.category != toUnit.category) {
-                                onToUnitChange(allUnits.first { u -> u.category == it.category && u != it })
-                            }
-                            expandedFrom = false
-                        })
+
+                ExposedDropdownMenuBox(expanded = expandedFrom, onExpandedChange = { expandedFrom = !expandedFrom }, modifier = Modifier.weight(1.7f)) {
+                    OutlinedTextField(
+                        value = fromUnit.name,
+                        onValueChange = {},
+                        readOnly = true,
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedFrom) },
+                        modifier = Modifier.menuAnchor()
+                    )
+                    ExposedDropdownMenu(expanded = expandedFrom, onDismissRequest = { expandedFrom = false }) {
+                        allUnits.forEach {
+                            DropdownMenuItem(text = { Text(it.name) }, onClick = {
+                                onFromUnitChange(it)
+                                if (it.category != toUnit.category) {
+                                    onToUnitChange(allUnits.first { u -> u.category == it.category && u != it })
+                                }
+                                expandedFrom = false
+                            })
+                        }
                     }
                 }
+                copyFromButton()
             }
-        }
 
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(
-                value = toValue,
-                onValueChange = { },
-                readOnly = true,
-                label = { Text("To") }
-            )
+            swapButton()
 
-            ExposedDropdownMenuBox(expanded = expandedTo, onExpandedChange = { expandedTo = !expandedTo }) {
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
-                    value = toUnit.name,
-                    onValueChange = {},
+                    value = toValue,
+                    onValueChange = { },
                     readOnly = true,
-                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedTo) },
-                    modifier = Modifier.menuAnchor()
+                    label = { Text("To") },
+                    modifier = Modifier.weight(3f)
                 )
-                ExposedDropdownMenu(expanded = expandedTo, onDismissRequest = { expandedTo = false }) {
-                    toUnits.forEach {
-                        DropdownMenuItem(text = { Text(it.name) }, onClick = { 
-                            onToUnitChange(it)
-                            expandedTo = false
-                        })
+
+                ExposedDropdownMenuBox(expanded = expandedTo, onExpandedChange = { expandedTo = !expandedTo }, modifier = Modifier.weight(1.7f)) {
+                    OutlinedTextField(
+                        value = toUnit.name,
+                        onValueChange = {},
+                        readOnly = true,
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedTo) },
+                        modifier = Modifier.menuAnchor()
+                    )
+                    ExposedDropdownMenu(expanded = expandedTo, onDismissRequest = { expandedTo = false }) {
+                        toUnits.forEach {
+                            DropdownMenuItem(text = { Text(it.name) }, onClick = {
+                                onToUnitChange(it)
+                                expandedTo = false
+                            })
+                        }
                     }
                 }
+                copyToButton()
             }
         }
-        PremiumFeatures(fromValue = fromValue, toValue = toValue, onSwap = onSwap)
     }
 }
 
 @Composable
 fun KeyboardFragment(modifier: Modifier = Modifier, onKeyPress: (String) -> Unit) {
-    Column(modifier = modifier.padding(16.dp)) {
-        Keyboard(onKeyPress)
+    Column(modifier = modifier) {
+        Keyboard(onKeyPress = onKeyPress, modifier = Modifier.fillMaxSize())
     }
 }
 
