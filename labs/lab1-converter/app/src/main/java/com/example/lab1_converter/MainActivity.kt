@@ -29,27 +29,52 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.example.lab1_converter.ui.theme.Lab1converterTheme
+import java.math.BigDecimal
+import java.math.RoundingMode
 
-sealed class ConversionUnit(val name: String, val category: String, val toBase: (Double) -> Double, val fromBase: (Double) -> Double) {
+sealed class ConversionUnit(
+    val name: String, 
+    val category: String, 
+    val toBase: (BigDecimal) -> BigDecimal, 
+    val fromBase: (BigDecimal) -> BigDecimal
+) {
     // Расстояние (базовая ед. - метр)
-    object Centimeters : ConversionUnit("см", "Расстояние", { it / 100.0 }, { it * 100.0 })
+    object Centimeters : ConversionUnit("см", "Расстояние", 
+        { it.divide(BigDecimal("100"), 20, RoundingMode.HALF_UP) }, 
+        { it.multiply(BigDecimal("100")) })
     object Meters : ConversionUnit("м", "Расстояние", { it }, { it })
-    object Kilometers : ConversionUnit("км", "Расстояние", { it * 1000.0 }, { it / 1000.0 })
-    object Miles : ConversionUnit("мл", "Расстояние", { it * 1609.34 }, { it / 1609.34 })
+    object Kilometers : ConversionUnit("км", "Расстояние", 
+        { it.multiply(BigDecimal("1000")) }, 
+        { it.divide(BigDecimal("1000"), 20, RoundingMode.HALF_UP) })
+    object Miles : ConversionUnit("мл", "Расстояние", 
+        { it.multiply(BigDecimal("1609.34")) }, 
+        { it.divide(BigDecimal("1609.34"), 20, RoundingMode.HALF_UP) })
 
     // Масса (базовая ед. - килограмм)
-    object Grams : ConversionUnit("г", "Масса", { it / 1000.0 }, { it * 1000.0 })
+    object Grams : ConversionUnit("г", "Масса", 
+        { it.divide(BigDecimal("1000"), 20, RoundingMode.HALF_UP) }, 
+        { it.multiply(BigDecimal("1000")) })
     object Kilograms : ConversionUnit("кг", "Масса", { it }, { it })
-    object Centners : ConversionUnit("ц", "Масса", { it * 100.0 }, { it / 100.0 })
-    object Tonnes : ConversionUnit("т", "Масса", { it * 1000.0 }, { it / 1000.0 })
+    object Centners : ConversionUnit("ц", "Масса", 
+        { it.multiply(BigDecimal("100")) }, 
+        { it.divide(BigDecimal("100"), 20, RoundingMode.HALF_UP) })
+    object Tonnes : ConversionUnit("т", "Масса", 
+        { it.multiply(BigDecimal("1000")) }, 
+        { it.divide(BigDecimal("1000"), 20, RoundingMode.HALF_UP) })
 
     // Время (базовая ед. - минута)
-    object Seconds : ConversionUnit("с", "Время", { it / 60.0 }, { it * 60.0 })
-    object Minutes : ConversionUnit("мин", "Время", { it }, { it }) // ИСПРАВЛЕНО: "м" -> "мин"
-    object Hours : ConversionUnit("ч", "Время", { it * 60.0 }, { it / 60.0 })
+    object Seconds : ConversionUnit("с", "Время", 
+        { it.divide(BigDecimal("60"), 20, RoundingMode.HALF_UP) }, 
+        { it.multiply(BigDecimal("60")) })
+    object Minutes : ConversionUnit("мин", "Время", { it }, { it })
+    object Hours : ConversionUnit("ч", "Время", 
+        { it.multiply(BigDecimal("60")) }, 
+        { it.divide(BigDecimal("60"), 20, RoundingMode.HALF_UP) })
 }
 
 val allUnits = listOf(
@@ -58,7 +83,6 @@ val allUnits = listOf(
     ConversionUnit.Seconds, ConversionUnit.Minutes, ConversionUnit.Hours
 )
 
-// "Сохранитель" для ConversionUnit, чтобы rememberSaveable знал, как с ним работать
 val unitSaver = Saver<ConversionUnit, String>(
     save = { it.name },
     restore = { name -> allUnits.first { it.name == name } }
@@ -87,20 +111,34 @@ fun MainApp() {
 
 @Composable
 fun ConverterApp() {
-    // remember заменен на rememberSaveable
-    var fromValue by rememberSaveable { mutableStateOf("") }
-    var toValue by remember { mutableStateOf("") } // Это значение вычисляется, его сохранять не нужно
+    var fromValue by rememberSaveable(stateSaver = TextFieldValue.Saver) { 
+        mutableStateOf(TextFieldValue("")) 
+    }
+    var toValue by remember { mutableStateOf(TextFieldValue("")) }
+    
     var fromUnit by rememberSaveable(stateSaver = unitSaver) { mutableStateOf<ConversionUnit>(ConversionUnit.Meters) }
     var toUnit by rememberSaveable(stateSaver = unitSaver) { mutableStateOf<ConversionUnit>(ConversionUnit.Kilometers) }
 
-    LaunchedEffect(fromValue, fromUnit, toUnit) {
-        if (fromValue.isBlank()) {
-            toValue = ""
+    LaunchedEffect(fromValue.text, fromUnit, toUnit) {
+        if (fromValue.text.isBlank() || fromValue.text == ".") {
+            toValue = TextFieldValue("")
             return@LaunchedEffect
         }
-        val from = fromValue.toDoubleOrNull()
-        if (from != null) {
-            toValue = "%.4f".format(convert(from, fromUnit, toUnit))
+        
+        try {
+            val from = BigDecimal(fromValue.text)
+            val result = convert(from, fromUnit, toUnit)
+                .setScale(6, RoundingMode.HALF_UP)
+                .stripTrailingZeros()
+            
+            val resultText = result.toPlainString()
+            
+            toValue = TextFieldValue(
+                text = resultText,
+                selection = TextRange(resultText.length)
+            )
+        } catch (e: Exception) {
+            toValue = TextFieldValue("Ошибка")
         }
     }
 
@@ -109,9 +147,11 @@ fun ConverterApp() {
         fromUnit = toUnit
         toUnit = tempUnit
 
-        val tempValue = fromValue
-        fromValue = toValue
-        toValue = tempValue
+        val oldFromText = fromValue.text
+        val oldToText = toValue.text
+        
+        fromValue = TextFieldValue(oldToText, TextRange(oldToText.length))
+        toValue = TextFieldValue(oldFromText, TextRange(oldFromText.length))
     }
 
     val configuration = LocalConfiguration.current
@@ -119,43 +159,30 @@ fun ConverterApp() {
         Row(modifier = Modifier.fillMaxSize().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             DataFragment(modifier = Modifier.weight(1f), fromValue = fromValue, toValue = toValue, fromUnit = fromUnit, toUnit = toUnit, onFromUnitChange = { fromUnit = it }, onToUnitChange = { toUnit = it }, onSwap = onSwap)
             KeyboardFragment(modifier = Modifier.weight(1f)) { key ->
-                    fromValue = updateFromValue(fromValue, key)
+                val newText = updateFromValue(fromValue.text, key)
+                fromValue = TextFieldValue(newText, TextRange(newText.length))
             }
         }
     } else {
         Column(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             DataFragment(modifier = Modifier.weight(2.5f), fromValue = fromValue, toValue = toValue, fromUnit = fromUnit, toUnit = toUnit, onFromUnitChange = { fromUnit = it }, onToUnitChange = { toUnit = it }, onSwap = onSwap)
             KeyboardFragment(modifier = Modifier.weight(5f)) { key ->
-                fromValue = updateFromValue(fromValue, key)
+                val newText = updateFromValue(fromValue.text, key)
+                fromValue = TextFieldValue(newText, TextRange(newText.length))
             }
         }
     }
 }
 
 fun updateFromValue(currentValue: String, key: String): String {
-    val maxLength = 10
+    val maxLength = 18
     return when (key) {
-        "C" -> {
-            if (currentValue.isNotEmpty()) {
-                currentValue.dropLast(1)
-            } else {
-                currentValue
-            }
-        }
-        "." -> {
-            if (!currentValue.contains(".") && currentValue.length < maxLength) {
-                currentValue + key
-            } else {
-                currentValue
-            }
-        }
-        else -> {
-            if (currentValue.length < maxLength) {
-                currentValue + key
-            } else {
-                currentValue
-            }
-        }
+        "AC" -> ""
+        "C" -> if (currentValue.isNotEmpty()) currentValue.dropLast(1) else currentValue
+        "." -> if (!currentValue.contains(".") && currentValue.length < maxLength) {
+            if (currentValue.isEmpty()) "0." else currentValue + key
+        } else currentValue
+        else -> if (currentValue.length < maxLength) currentValue + key else currentValue
     }
 }
 
@@ -163,8 +190,8 @@ fun updateFromValue(currentValue: String, key: String): String {
 @Composable
 fun DataFragment(
     modifier: Modifier = Modifier, 
-    fromValue: String, 
-    toValue: String, 
+    fromValue: TextFieldValue, 
+    toValue: TextFieldValue, 
     fromUnit: ConversionUnit, 
     toUnit: ConversionUnit, 
     onFromUnitChange: (ConversionUnit) -> Unit, 
@@ -175,7 +202,7 @@ fun DataFragment(
     var expandedTo by remember { mutableStateOf(false) }
     val toUnits = allUnits.filter { it.category == fromUnit.category }
 
-    PremiumFeatures(fromValue = fromValue, toValue = toValue, onSwap = onSwap) { swapButton, copyFromButton, copyToButton ->
+    PremiumFeatures(fromValue = fromValue.text, toValue = toValue.text, onSwap = onSwap) { swapButton, copyFromButton, copyToButton ->
         Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
@@ -183,6 +210,7 @@ fun DataFragment(
                     onValueChange = { },
                     readOnly = true,
                     label = { Text("From") },
+                    singleLine = true,
                     modifier = Modifier.weight(3f)
                 )
 
@@ -217,6 +245,7 @@ fun DataFragment(
                     onValueChange = { },
                     readOnly = true,
                     label = { Text("To") },
+                    singleLine = true,
                     modifier = Modifier.weight(3f)
                 )
 
@@ -250,8 +279,8 @@ fun KeyboardFragment(modifier: Modifier = Modifier, onKeyPress: (String) -> Unit
     }
 }
 
-fun convert(value: Double, from: ConversionUnit, to: ConversionUnit): Double {
-    if (from.category != to.category) return Double.NaN
+fun convert(value: BigDecimal, from: ConversionUnit, to: ConversionUnit): BigDecimal {
+    if (from.category != to.category) return BigDecimal.ZERO
     val baseValue = from.toBase(value)
     return to.fromBase(baseValue)
 }
